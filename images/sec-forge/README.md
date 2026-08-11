@@ -47,6 +47,27 @@ semgrep --config=auto .
 checkov -d .
 ```
 
+### Mounted directory ownership
+
+The image runs as `scanner`, uid 1000, and a bind mount keeps the ownership and
+mode it has on the host. If your host uid is not 1000, or the tree is root
+owned, or directories are mode 750, the scanners report `Permission denied` on
+paths they cannot read, and anything writing a report into the mount fails.
+
+Run as your own uid when the host tree is yours:
+
+```bash
+docker run --rm -it --user "$(id -u):$(id -g)" -v "${PWD}:/workspace" cloudsprocket/sec-forge:latest
+```
+
+For a root-owned or otherwise unreadable tree, mount it read-only and write
+results somewhere the container user owns:
+
+```bash
+docker run --rm -it -v "${PWD}:/workspace:ro" -v sec-forge-out:/tmp/out cloudsprocket/sec-forge:latest \
+  trivy fs --output /tmp/out/report.json --format json /workspace
+```
+
 ## Configuration
 
 No required environment variables. Optional cache directories live under the

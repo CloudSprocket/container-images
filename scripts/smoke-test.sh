@@ -19,10 +19,13 @@ prefix="smoke-${image_name//\//-}-$$"
 cleanup_cmds=()
 
 cleanup() {
-  local cmd
-  for cmd in "${cleanup_cmds[@]}"; do
-    # shellcheck disable=SC2086
-    eval $cmd >/dev/null 2>&1 || true
+  # Tear down in reverse registration order. Networks are registered before
+  # the containers attached to them, so removing forwards would try to drop a
+  # network that still has active endpoints, silently leak it, and leave
+  # orphan smoke networks behind on repeat local runs.
+  local i
+  for ((i = ${#cleanup_cmds[@]} - 1; i >= 0; i--)); do
+    eval "${cleanup_cmds[i]}" >/dev/null 2>&1 || true
   done
 }
 trap cleanup EXIT
