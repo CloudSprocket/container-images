@@ -42,7 +42,14 @@ jobs:
         shell: pwsh
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          # Updating a repository description or overview is a settings change
+          # and needs repo:admin. Pushing an image only needs repo:write, so
+          # the release token is not enough and returns
+          # "access denied: insufficient scope" on the PATCH.
+          # Set DOCKERHUB_METADATA_TOKEN to an admin-scoped token to keep the
+          # push path on a narrower one. Without it this falls back to the
+          # release token, which works only if that token is admin-scoped.
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_METADATA_TOKEN || secrets.DOCKERHUB_TOKEN }}
           TARGET_IMAGE: ${{ inputs.image }}
         run: |
           $ErrorActionPreference = 'Stop'
