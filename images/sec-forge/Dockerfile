@@ -79,9 +79,18 @@ RUN python3 -m venv /opt/tools \
     && semgrep --version \
     && checkov --version
 
-RUN useradd --create-home --shell /bin/bash --uid 1000 scanner \
-    && mkdir -p /workspace \
-    && chown scanner:scanner /workspace
+# Ubuntu 24.04 ships a default "ubuntu" account already holding uid/gid 1000,
+# so creating scanner there collides unless that account is removed first.
+# Keeping scanner on 1000 is deliberate: it is the usual first uid on a Linux
+# host, so a bind mount is readable and writable without a --user override for
+# most people. See this image's README for the cases where it is not.
+RUN set -eux; \
+    if id -u ubuntu >/dev/null 2>&1; then userdel --remove ubuntu; fi; \
+    if getent group ubuntu >/dev/null 2>&1; then groupdel ubuntu; fi; \
+    groupadd --gid 1000 scanner; \
+    useradd --create-home --shell /bin/bash --uid 1000 --gid 1000 scanner; \
+    mkdir -p /workspace; \
+    chown scanner:scanner /workspace
 
 USER scanner
 WORKDIR /workspace
