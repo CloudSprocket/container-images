@@ -219,6 +219,24 @@ jobs:
           IMAGE_NAME: ${{ matrix.image }}
         run: bash scripts/smoke-test.sh "$IMAGE_NAME" dev
 
+      # Publishing is automated, so this is the gate that a human review would
+      # otherwise be. Policy is CRITICAL with a fix available: unfixed CVEs in
+      # a base image cannot be acted on here and would block every release
+      # indefinitely, whereas a fixable critical means a rebuild or a bump is
+      # genuinely outstanding. Release cannot proceed without this passing,
+      # because release.yml calls this workflow as its quality gate.
+      - name: Scan for fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8  # v0.36.0
+        with:
+          image-ref: docker.io/cloudsprocket/${{ matrix.image }}:dev
+          scan-type: image
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          hide-progress: true
+
   ci-success:
     name: CI success
     if: always()
