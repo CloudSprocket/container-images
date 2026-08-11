@@ -92,14 +92,30 @@ foreach ($entry in $catalog) {
     }
 }
 
-$credentialJson = $server | & docker-credential-desktop.exe get
-if ($LASTEXITCODE -ne 0) {
-    throw 'Docker Desktop did not return Docker Hub credentials.'
-}
+$envUsername = [string]$env:DOCKERHUB_USERNAME
+$envToken = [string]$env:DOCKERHUB_TOKEN
 
-$credential = $credentialJson | ConvertFrom-Json
-if ([string]::IsNullOrWhiteSpace($credential.Username) -or [string]::IsNullOrWhiteSpace($credential.Secret)) {
-    throw 'The Docker Hub credential is incomplete.'
+if (-not [string]::IsNullOrWhiteSpace($envUsername) -and -not [string]::IsNullOrWhiteSpace($envToken)) {
+    Write-Host 'Using Docker Hub credentials from DOCKERHUB_USERNAME and DOCKERHUB_TOKEN environment variables.'
+    $credential = [pscustomobject]@{
+        Username = $envUsername
+        Secret = $envToken
+    }
+} else {
+    Write-Host 'Using Docker Hub credentials from Docker Desktop credential store (docker-credential-desktop.exe).'
+    try {
+        $credentialJson = $server | & docker-credential-desktop.exe get
+        if ($LASTEXITCODE -ne 0) {
+            throw 'docker-credential-desktop.exe did not return Docker Hub credentials.'
+        }
+
+        $credential = $credentialJson | ConvertFrom-Json
+        if ([string]::IsNullOrWhiteSpace($credential.Username) -or [string]::IsNullOrWhiteSpace($credential.Secret)) {
+            throw 'The Docker Hub credential from docker-credential-desktop.exe is incomplete.'
+        }
+    } catch {
+        throw 'No usable Docker Hub credential found. Set both DOCKERHUB_USERNAME and DOCKERHUB_TOKEN, or ensure docker-credential-desktop.exe can return a Docker Hub login.'
+    }
 }
 
 $tokenRequest = @{

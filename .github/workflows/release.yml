@@ -163,6 +163,20 @@ jobs:
           docker pull "docker.io/cloudsprocket/${IMAGE_NAME}:${RELEASE_VERSION}"
           bash scripts/smoke-test.sh "$IMAGE_NAME" "$RELEASE_VERSION"
 
+      # Hub overviews must carry description, source, contributing and website
+      # for Docker-Sponsored Open Source compliance. Only refresh after publish
+      # and both post-push verification steps have passed, so a failed check
+      # never updates a Hub page to describe a broken release.
+      - name: Update Docker Hub repository metadata
+        shell: pwsh
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: >-
+          ./scripts/update-dockerhub-metadata.ps1
+          -Apply
+          -Image "${{ needs.resolve.outputs.image }}"
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
