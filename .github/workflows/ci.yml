@@ -1,0 +1,240 @@
+---
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_call:
+    inputs:
+      pull:
+        description: Pull base references before building
+        required: false
+        default: false
+        type: boolean
+      images:
+        description: >-
+          Comma-separated image names, "all", or empty to use path filters
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  changes:
+    name: Detect changed images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      any: ${{ steps.evaluate.outputs.any }}
+      matrix: ${{ steps.evaluate.outputs.matrix }}
+      images: ${{ steps.evaluate.outputs.images }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Path filter
+        if: inputs.images == '' || inputs.images == null
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+        with:
+          filters: |
+            shared:
+              - 'docker-bake.hcl'
+              - 'Makefile'
+              - '.hadolint.yaml'
+              - 'scripts/**'
+              - '.github/workflows/ci.yml'
+            sec-forge:
+              - 'images/sec-forge/**'
+            mesh-router:
+              - 'images/mesh-router/**'
+            data-streams-producer:
+              - 'images/data-streams-producer/**'
+            data-streams-consumer:
+              - 'images/data-streams-consumer/**'
+
+      - name: Evaluate image matrix
+        id: evaluate
+        env:
+          FORCE_IMAGES: ${{ inputs.images }}
+          SHARED: ${{ steps.filter.outputs.shared }}
+          SEC_FORGE: ${{ steps.filter.outputs.sec-forge }}
+          MESH_ROUTER: ${{ steps.filter.outputs.mesh-router }}
+          DATA_STREAMS_PRODUCER: ${{ steps.filter.outputs.data-streams-producer }}
+          DATA_STREAMS_CONSUMER: ${{ steps.filter.outputs.data-streams-consumer }}
+        run: |
+          set -euo pipefail
+          declare -a selected=()
+
+          if [[ -n "${FORCE_IMAGES:-}" ]]; then
+            if [[ "$FORCE_IMAGES" == "all" ]]; then
+              selected=(sec-forge mesh-router data-streams-producer data-streams-consumer)
+            else
+              IFS=',' read -r -a selected <<< "$FORCE_IMAGES"
+            fi
+          else
+            if [[ "${SHARED:-}" == "true" ]]; then
+              selected=(sec-forge mesh-router data-streams-producer data-streams-consumer)
+            else
+              [[ "${SEC_FORGE:-}" == "true" ]] && selected+=(sec-forge)
+              [[ "${MESH_ROUTER:-}" == "true" ]] && selected+=(mesh-router)
+              [[ "${DATA_STREAMS_PRODUCER:-}" == "true" ]] && selected+=(data-streams-producer)
+              [[ "${DATA_STREAMS_CONSUMER:-}" == "true" ]] && selected+=(data-streams-consumer)
+            fi
+          fi
+
+          # Trim whitespace from forced names.
+          declare -a cleaned=()
+          for name in "${selected[@]+"${selected[@]}"}"; do
+            name="$(echo "$name" | xargs)"
+            [[ -n "$name" ]] || continue
+            cleaned+=("$name")
+          done
+          selected=("${cleaned[@]+"${cleaned[@]}"}")
+
+          if ((${#selected[@]} == 0)); then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "images=" >> "$GITHUB_OUTPUT"
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"
+            echo "No image changes detected; runtime jobs will be skipped."
+            exit 0
+          fi
+
+          declare -a matrix_entries=()
+          for name in "${selected[@]}"; do
+            matrix_entries+=("{\"image\":\"${name}\",\"arch\":\"amd64\",\"runner\":\"ubuntu-24.04\",\"platform\":\"linux/amd64\"}")
+            matrix_entries+=("{\"image\":\"${name}\",\"arch\":\"arm64\",\"runner\":\"ubuntu-24.04-arm\",\"platform\":\"linux/arm64\"}")
+          done
+
+          images_csv="$(IFS=,; echo "${selected[*]}")"
+          matrix_json="[$(IFS=,; echo "${matrix_entries[*]}")]"
+          echo "any=true" >> "$GITHUB_OUTPUT"
+          echo "images=${images_csv}" >> "$GITHUB_OUTPUT"
+          echo "matrix=${matrix_json}" >> "$GITHUB_OUTPUT"
+          echo "Selected images: ${images_csv}"
+
+  static:
+    name: Static validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+
+      - name: Install static analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep shellcheck python3-venv
+          python3 -m venv .venv
+          .venv/bin/pip install --disable-pip-version-check yamllint==1.38.0
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Run project static checks
+        run: bash scripts/static-checks.sh
+
+  image:
+    name: ${{ matrix.image }} on ${{ matrix.arch }}
+    needs: [changes, static]
+    if: needs.changes.outputs.any == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.changes.outputs.matrix) }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+
+      - name: Lint Dockerfile with Hadolint
+        if: matrix.arch == 'amd64'
+        env:
+          HADOLINT_IMAGE: >-
+            docker.io/hadolint/hadolint:v2.14.0-alpine@sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c
+          IMAGE_NAME: ${{ matrix.image }}
+        run: |
+          dockerfile="images/${IMAGE_NAME}/Dockerfile"
+          docker run --rm -i \
+            --mount "type=bind,source=$PWD/.hadolint.yaml,target=/.hadolint.yaml,readonly" \
+            "$HADOLINT_IMAGE" \
+            /bin/hadolint --config /.hadolint.yaml - < "$dockerfile"
+
+      - name: ShellCheck image shell scripts
+        if: matrix.arch == 'amd64'
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          mapfile -t shells < <(
+            find "images/${IMAGE_NAME}" -type f \( -name '*.sh' -o -name '*.bash' \) -print | sort
+          )
+          if ((${#shells[@]} == 0)); then
+            echo "No shell scripts under images/${IMAGE_NAME}"
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck "${shells[@]}"
+
+      - name: Build image for platform
+        env:
+          BUILD_PLATFORM: ${{ matrix.platform }}
+          BUILD_TARGET: ${{ matrix.image }}
+          PULL_BASES: ${{ inputs.pull || false }}
+          REVISION: ${{ github.sha }}
+          VERSION: dev
+        run: |
+          set -euo pipefail
+          export CREATED
+          CREATED="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          pull_args=()
+          if [[ "$PULL_BASES" == "true" ]]; then
+            pull_args+=(--pull)
+          fi
+          docker buildx bake -f docker-bake.hcl "$BUILD_TARGET" --load \
+            "${pull_args[@]}" \
+            --set "${BUILD_TARGET}.platform=${BUILD_PLATFORM}"
+
+      - name: Smoke test
+        env:
+          IMAGE_NAME: ${{ matrix.image }}
+        run: bash scripts/smoke-test.sh "$IMAGE_NAME" dev
+
+  ci-success:
+    name: CI success
+    if: always()
+    needs: [changes, static, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Aggregate results
+        env:
+          STATIC_RESULT: ${{ needs.static.result }}
+          IMAGE_RESULT: ${{ needs.image.result }}
+          ANY_IMAGES: ${{ needs.changes.outputs.any }}
+        run: |
+          set -euo pipefail
+          if [[ "$STATIC_RESULT" != "success" ]]; then
+            echo "Static validation failed: ${STATIC_RESULT}" >&2
+            exit 1
+          fi
+          if [[ "$ANY_IMAGES" == "true" && "$IMAGE_RESULT" != "success" ]]; then
+            echo "Image jobs failed: ${IMAGE_RESULT}" >&2
+            exit 1
+          fi
+          echo "CI checks passed."

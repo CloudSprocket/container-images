@@ -1,0 +1,42 @@
+---
+services:
+  redpanda:
+    # v25.3.15 verified on Docker Hub (2026-08-11).
+    image: docker.io/redpandadata/redpanda:v25.3.15
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+
+  producer:
+    build:
+      context: ../../images/data-streams-producer
+    image: cloudsprocket/data-streams-producer:dev
+    depends_on:
+      - redpanda
+    environment:
+      KAFKA_BROKER: redpanda:9092
+      KAFKA_TOPIC: events
+      PRODUCE_INTERVAL_SECONDS: "0.1"
+
+  consumer:
+    build:
+      context: ../../images/data-streams-consumer
+    image: cloudsprocket/data-streams-consumer:dev
+    depends_on:
+      - redpanda
+    environment:
+      KAFKA_BROKER: redpanda:9092
+      KAFKA_TOPIC: events
+      KAFKA_GROUP_ID: slow-consumer-group
+      CONSUME_INTERVAL_SECONDS: "1.0"

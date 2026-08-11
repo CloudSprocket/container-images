@@ -1,0 +1,2 @@
+# Verified on PyPI 2026-08-11: https://pypi.org/project/confluent-kafka/2.15.0/
+confluent-kafka==2.15.0

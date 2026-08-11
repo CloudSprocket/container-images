@@ -1,0 +1,24 @@
+---
+services:
+  mesh-router:
+    build:
+      context: ..
+    image: cloudsprocket/mesh-router:dev
+    ports:
+      - "80:80"
+      - "8404:8404"
+    environment:
+      BACKEND_SERVERS: "web1:80,web2:80"
+    depends_on:
+      - web1
+      - web2
+
+  web1:
+    image: docker.io/library/nginx:alpine
+    expose:
+      - "80"
+
+  web2:
+    image: docker.io/library/nginx:alpine
+    expose:
+      - "80"
