@@ -5,7 +5,22 @@
 Create a GitHub environment named `dockerhub` holding these secrets:
 
 - `DOCKERHUB_USERNAME`
-- `DOCKERHUB_TOKEN`, using a scoped access token rather than an account password
+- `DOCKERHUB_TOKEN`, a `repo:write` access token rather than an account
+  password. This pushes images.
+- `DOCKERHUB_METADATA_TOKEN`, a `repo:admin` access token. Optional but
+  recommended.
+
+**The two tokens exist because the scopes genuinely differ.** Pushing an image
+needs `repo:write`. Changing a repository description or overview is a settings
+change and needs `repo:admin`, so a push token fails the metadata call with
+`access denied: insufficient scope`. Docker Hub's scopes are
+`repo:public_read`, `repo:read`, `repo:write` and `repo:admin`, each including
+the ones below it.
+
+If `DOCKERHUB_METADATA_TOKEN` is absent the metadata steps fall back to
+`DOCKERHUB_TOKEN`, which then has to be admin-scoped. Keeping them separate is
+preferred: `repo:admin` also grants delete, and the push path runs on every
+release while metadata runs rarely.
 
 **Publishing is automated. There is no manual approval step.** Pushing a
 release tag publishes to Docker Hub without further human action, so the

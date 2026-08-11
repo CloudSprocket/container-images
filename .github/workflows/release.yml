@@ -171,7 +171,11 @@ jobs:
         shell: pwsh
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          # Repository settings need repo:admin, while pushing an image needs
+          # only repo:write, so the push token returns "access denied:
+          # insufficient scope" on the PATCH. Set DOCKERHUB_METADATA_TOKEN to
+          # an admin-scoped token to keep the push path on a narrower one.
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_METADATA_TOKEN || secrets.DOCKERHUB_TOKEN }}
         run: >-
           ./scripts/update-dockerhub-metadata.ps1
           -Apply
