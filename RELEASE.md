@@ -101,16 +101,24 @@ immutable version share a digest, and creates a GitHub release for that tag.
 
 ## After the workflow succeeds
 
-Refresh the Docker Hub short descriptions and overviews so they reference the
-new immutable tag:
+Docker Hub short descriptions and overviews are applied automatically by the
+release workflow for the released image only. The step runs after publish and
+both post-push verification steps have passed, using the `DOCKERHUB_USERNAME`
+and `DOCKERHUB_TOKEN` secrets. You do not need to run the metadata script by
+hand after a successful release.
+
+The same script remains available for a local preview or a backfill (for
+example after editing overview text, or if a past release left a Hub page
+blank):
 
 ```powershell
 .\scripts\update-dockerhub-metadata.ps1 -Apply
+.\scripts\update-dockerhub-metadata.ps1 -Apply -Image sec-forge
 ```
 
-The script reads each image's `VERSION` file, authenticates with the Docker
-Hub credentials held by Docker Desktop and updates all four repositories. Run
-it without `-Apply` to preview the current state first.
+Without `-Apply` the script only reports the current Hub state. Locally it
+uses `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` when both are set; otherwise it
+falls back to the Docker Desktop credential store.
 
 Every Hub overview must include a description, a source-code link, a
 contributing-guidelines link and the organisation website

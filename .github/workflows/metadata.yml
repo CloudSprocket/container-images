@@ -1,0 +1,55 @@
+---
+# Applies Docker Hub descriptions and overviews on demand.
+#
+# The release workflow already refreshes the page for the image it publishes,
+# which keeps metadata current going forward. This exists for the two cases
+# that cannot reach: backfilling repositories that were published before the
+# metadata step existed, and repairing a page without inventing a version bump
+# just to trigger a release.
+#
+# It runs in the dockerhub environment so it can read the same credentials the
+# release uses, which means nobody needs a Hub token on their own machine.
+name: Docker Hub metadata
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: >-
+          Single image name (sec-forge, mesh-router, data-streams-producer,
+          data-streams-consumer). Leave empty to apply all four.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metadata-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Apply Hub metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: dockerhub
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Apply descriptions and overviews
+        shell: pwsh
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          TARGET_IMAGE: ${{ inputs.image }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:TARGET_IMAGE)) {
+              Write-Host 'Applying metadata to all four repositories.'
+              ./scripts/update-dockerhub-metadata.ps1 -Apply
+          } else {
+              Write-Host "Applying metadata to $($env:TARGET_IMAGE) only."
+              ./scripts/update-dockerhub-metadata.ps1 -Apply -Image $env:TARGET_IMAGE
+          }
