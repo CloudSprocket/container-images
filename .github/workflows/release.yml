@@ -26,6 +26,12 @@ on:
 
 permissions:
   contents: read
+  # Required because the quality job calls ci.yml, which declares
+  # pull-requests: read for its path filter. A called workflow's token
+  # permissions can only be downgraded by the caller, never elevated, so
+  # granting less than the callee declares fails the whole run at startup
+  # before any job exists.
+  pull-requests: read
 
 concurrency:
   group: release-${{ github.ref }}
